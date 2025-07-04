@@ -1,54 +1,51 @@
-const express = require('express');
-const multer = require('multer');
-const nodemailer = require('nodemailer');
-const Receipt = require('../models/receipt');
+const express = require("express");
 const router = express.Router();
-const path = require('path');
-const fs = require('fs');
+const multer = require("multer");
+const nodemailer = require("nodemailer");
 
-// Multer config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = 'uploads/';
-    if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath);
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
+// Use memory storage for uploaded files
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// POST /api/upload-receipt
-router.post('/upload-receipt', upload.single('receipt'), async (req, res) => {
+// Route to handle receipt uploads
+router.post("/upload", upload.single("receipt"), async (req, res) => {
   try {
-    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-    const newReceipt = new Receipt({
-      user: req.body.userId,
-      imageUrl
-    });
-    await newReceipt.save();
+    const { name, email } = req.body;
 
-    // Send email to admin
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    // Setup the Gmail transporter
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
+      service: "gmail",
       auth: {
-        user: process.env.ADMIN_EMAIL,
-        pass: process.env.ADMIN_APP_PASSWORD
-      }
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_PASS,
+      },
     });
 
-    await transporter.sendMail({
-      from: `"GrowRichInvestments" <${process.env.ADMIN_EMAIL}>`,
-      to: process.env.ADMIN_EMAIL,
-      subject: 'New Payment Receipt Uploaded',
-      html: `<p>A new receipt has been uploaded by a user.</p><p><a href="${imageUrl}" target="_blank">View Receipt</a></p>`
-    });
+    // Prepare the email
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: process.env.GMAIL_USER, // send to admin
+      subject: "New Manual Payment Receipt Upload - GrowRich",
+      text: `Name: ${name}\nEmail: ${email}\n\nA new payment receipt has been uploaded.`,
+      attachments: [
+        {
+          filename: req.file.originalname,
+          content: req.file.buffer,
+        },
+      ],
+    };
 
-    res.status(201).json({ message: 'Receipt uploaded and email sent to admin' });
-  } catch (err) {
-    console.error('Error uploading receipt:', err);
-    res.status(500).json({ error: 'Server error' });
+    // Send the email
+    await transporter.sendMail(mailOptions);
+
+    res.status(200).json({ message: "Receipt uploaded and email sent to admin." });
+  } catch (error) {
+    console.error("Error uploading receipt or sending email:", error);
+    res.status(500).json({ error: "Something went wrong while processing the receipt." });
   }
 });
 
